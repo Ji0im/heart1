@@ -1,0 +1,294 @@
+---
+title: "heart"
+output: pdf_document
+date: "2025-03-20"
+---
+
+```{r}
+# 加载必要的库
+library(tidyverse)
+
+# 加载数据
+heart_data <- read.csv("heart_failure.csv")
+
+# 查看数据的结构和前几行
+str(heart_data)
+head(heart_data)
+
+# 检查数据的摘要
+summary(heart_data)
+
+```
+```{r}
+# 查看数据中的缺失值
+colSums(is.na(heart_data))
+
+# 处理缺失值（例如，使用列的中位数填充）
+heart_data$blood_pressure[is.na(heart_data$blood_pressure)] <- median(heart_data$blood_pressure, na.rm = TRUE)
+heart_data$serum_creatinine[is.na(heart_data$serum_creatinine)] <- median(heart_data$serum_creatinine, na.rm = TRUE)
+
+# 处理血压异常值（假设血压值应在0到200之间）
+heart_data$blood_pressure[heart_data$blood_pressure < 0 | heart_data$blood_pressure > 200] <- median(heart_data$blood_pressure, na.rm = TRUE)
+
+# 检查数据的基本统计信息，确保没有异常值
+summary(heart_data)
+
+```
+```{r}
+# 清理肌酸激酶异常值，假设最大值应小于3000
+heart_data$creatinine_phosphokinase[heart_data$creatinine_phosphokinase > 3000] <- median(heart_data$creatinine_phosphokinase, na.rm = TRUE)
+
+# 清理血小板异常值，假设正常范围在150000到450000之间
+heart_data$platelets[heart_data$platelets > 450000 | heart_data$platelets < 150000] <- median(heart_data$platelets, na.rm = TRUE)
+
+# 清理血清肌酐异常值，假设正常范围在0.5到1.5之间
+heart_data$serum_creatinine[heart_data$serum_creatinine > 1.5] <- median(heart_data$serum_creatinine, na.rm = TRUE)
+
+# 查看清理后的数据
+summary(heart_data)
+
+```
+
+
+```{r}
+# 目标变量 fatal_mi 的分布
+ggplot(heart_data, aes(x = factor(fatal_mi))) + 
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribution of Fatal MI", x = "Fatal MI", y = "Count")
+
+```
+```{r}
+# 查看年龄的分布
+ggplot(heart_data, aes(x = age)) + 
+  geom_histogram(bins = 20, fill = "salmon", color = "black") +
+  labs(title = "Age Distribution", x = "Age", y = "Count")
+
+# 查看血压的分布
+ggplot(heart_data, aes(x = high_blood_pressure)) + 
+  geom_histogram(bins = 20, fill = "lightgreen", color = "black") +
+  labs(title = "Blood Pressure Distribution", x = "Blood Pressure", y = "Count")
+
+# 查看血小板的分布
+ggplot(heart_data, aes(x = platelets)) + 
+  geom_histogram(bins = 20, fill = "lightblue", color = "black") +
+  labs(title = "Platelets Distribution", x = "Platelets", y = "Count")
+
+```
+```{r}
+# 年龄与血压之间的关系
+ggplot(heart_data, aes(x = age, y = high_blood_pressure, color = factor(fatal_mi))) +
+  geom_point() +
+  labs(title = "Age vs Blood Pressure by Fatal MI", x = "Age", y = "Blood Pressure")
+
+# 年龄与血小板之间的关系
+ggplot(heart_data, aes(x = age, y = platelets, color = factor(fatal_mi))) +
+  geom_point() +
+  labs(title = "Age vs Platelets by Fatal MI", x = "Age", y = "Platelets")
+
+# 年龄与是否发生致命心肌梗死之间的关系
+ggplot(heart_data, aes(x = age, fill = factor(fatal_mi))) +
+  geom_histogram(binwidth = 5, position = "dodge") +
+  labs(title = "Age Distribution by Fatal MI", x = "Age", y = "Count")
+
+```
+
+
+
+```{r}
+library(ROSE)
+
+# 使用 ROSE 进行过采样处理数据不平衡
+data_balanced <- ROSE(fatal_mi ~ ., data = heart_data, seed = 123)$data
+
+# 查看新的类别分布
+ggplot(data_balanced, aes(x = factor(fatal_mi))) + 
+  geom_bar(fill = "lightblue") +
+  labs(title = "Balanced Distribution of Fatal MI", x = "Fatal MI", y = "Count")
+
+```
+```{r}
+# 查看 high_blood_pressure 变量的分布
+table(heart_data$high_blood_pressure)
+
+# 如果确认数据存在问题（如0和1之间没有明确划分），可以选择删除或重编码
+heart_data$high_blood_pressure <- as.factor(heart_data$high_blood_pressure)
+
+# 检查处理后的数据
+table(heart_data$high_blood_pressure)
+
+```
+```{r}
+library(caret)
+library(rpart)
+
+# 数据划分：将数据分为训练集和测试集
+set.seed(123)
+trainIndex <- createDataPartition(data_balanced$fatal_mi, p = 0.8, list = FALSE)
+trainData <- data_balanced[trainIndex, ]
+testData <- data_balanced[-trainIndex, ]
+
+# ---------------------- 训练逻辑回归模型 ----------------------
+log_model <- glm(fatal_mi ~ ., data = trainData, family = binomial)
+summary(log_model)
+
+# 预测逻辑回归模型
+log_pred <- predict(log_model, testData, type = "response")
+log_pred_class <- ifelse(log_pred > 0.5, 1, 0)
+
+# 逻辑回归的混淆矩阵
+log_conf_matrix <- confusionMatrix(as.factor(log_pred_class), as.factor(testData$fatal_mi))
+log_conf_matrix
+```
+```{r}
+tree_model <- rpart(fatal_mi ~ ., data = trainData, method = "class")
+summary(tree_model)
+
+# 预测决策树模型
+tree_pred <- predict(tree_model, testData, type = "class")
+
+# 决策树的混淆矩阵
+tree_conf_matrix <- confusionMatrix(as.factor(tree_pred), as.factor(testData$fatal_mi))
+tree_conf_matrix
+```
+```{r}
+# 加载 randomForest 包
+library(randomForest)
+
+# 确保响应变量 fatal_mi 是因子类型
+trainData$fatal_mi <- as.factor(trainData$fatal_mi)
+testData$fatal_mi <- as.factor(testData$fatal_mi)
+
+# 训练随机森林模型
+rf_model <- randomForest(fatal_mi ~ ., data = trainData)
+
+# 查看模型摘要
+summary(rf_model)
+
+# 使用训练好的模型进行预测
+rf_pred <- predict(rf_model, testData)
+
+# 确保预测值和实际值的因子水平一致
+rf_pred <- factor(rf_pred, levels = levels(testData$fatal_mi))
+
+# 计算并查看混淆矩阵
+rf_conf_matrix <- confusionMatrix(rf_pred, as.factor(testData$fatal_mi))
+
+# 输出混淆矩阵结果
+print(rf_conf_matrix)
+
+```
+
+
+```{r}
+# Load the pROC package
+library(pROC)
+
+# 预测和计算 ROC 曲线
+# 对随机森林模型进行预测（概率值）
+rf_pred_prob <- predict(rf_model, testData, type = "prob")[, 2]
+roc_curve_rf <- roc(testData$fatal_mi, rf_pred_prob)
+
+# 对决策树模型进行预测（概率值）
+tree_pred_prob <- predict(tree_model, testData, type = "prob")[, 2]
+roc_curve_tree <- roc(testData$fatal_mi, tree_pred_prob)
+
+# 对逻辑回归模型进行预测（概率值）
+log_pred_prob <- predict(log_model, testData, type = "response")
+roc_curve_log <- roc(testData$fatal_mi, log_pred_prob)
+
+# 绘制 ROC 曲线并将它们合并到同一张图中
+plot(roc_curve_rf, main = "ROC Curves for Models", col = "blue", lwd = 2)  # 绘制随机森林 ROC 曲线
+plot(roc_curve_tree, col = "red", lwd = 2, add = TRUE)  # 添加决策树 ROC 曲线
+plot(roc_curve_log, col = "green", lwd = 2, add = TRUE)  # 添加逻辑回归 ROC 曲线
+
+# 添加图例
+legend("bottomright", legend = c("Random Forest", "Decision Tree", "Logistic Regression"), 
+       col = c("blue", "red", "green"), lwd = 2)
+
+```
+
+
+```{r}
+# 使用训练好的模型进行预测，获取概率值
+rf_pred_prob <- predict(rf_model, testData, type = "prob")[,2]  # 取出预测为 1 类的概率
+
+# 计算 ROC 和 AUC
+roc_curve <- roc(testData$fatal_mi, rf_pred_prob)
+
+# 绘制 ROC 曲线
+plot(roc_curve, main = "ROC Curve for Random Forest", col = "blue", lwd = 2)
+
+# 计算 AUC
+auc_value <- auc(roc_curve)
+cat("AUC:", auc_value)
+```
+
+
+```{r}
+library(pROC)
+
+# 对逻辑回归模型进行预测（概率值）
+log_pred_prob <- predict(log_model, testData, type = "response")
+
+# 绘制 ROC 曲线
+roc_curve <- roc(testData$fatal_mi, log_pred_prob)
+plot(roc_curve, main = "ROC Curve for Logistic Regression")
+
+# 计算 AUC
+auc(roc_curve)
+
+```
+```{r}
+# 对决策树模型进行预测（概率值）
+tree_pred_prob <- predict(tree_model, testData, type = "prob")[, 2]
+
+# 绘制 ROC 曲线
+roc_curve_tree <- roc(testData$fatal_mi, tree_pred_prob)
+plot(roc_curve_tree, main = "ROC Curve for Decision Tree")
+
+# 计算 AUC
+auc(roc_curve_tree)
+
+```
+
+
+```{r}
+library(randomForest)
+library(caret)
+
+# 使用递归特征消除法（RFE）选择特征
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+rfe_result <- rfe(trainData[, -ncol(trainData)], trainData$fatal_mi, sizes=c(1:10), rfeControl=control)
+
+# 查看选择的特征
+rfe_result
+
+```
+```{r}
+library(caret)
+
+# 设置交叉验证的参数，使用10折交叉验证
+train_control <- trainControl(method="cv", number=10)
+
+# 训练逻辑回归模型
+log_reg_model <- train(fatal_mi ~ ., data=trainData, method="glm", family="binomial", trControl=train_control)
+
+# 查看模型结果
+print(log_reg_model)
+# 训练决策树模型，使用10折交叉验证
+tree_model <- train(fatal_mi ~ ., data=trainData, method="rpart", trControl=train_control)
+
+# 查看结果
+print(tree_model)
+
+# 训练随机森林模型，使用10折交叉验证
+rf_model <- train(fatal_mi ~ ., data=trainData, method="rf", trControl=train_control)
+
+# 查看结果
+print(rf_model)
+
+```
+
+
+
+
